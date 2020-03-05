@@ -59,18 +59,20 @@ s0.setGlossaryName("YieldStress");
 @LocalVariable double delta;
 
 @AuxiliaryStateVariable stress sstar_el;
+@AuxiliaryStateVariable stress fstar_el;
 @AuxiliaryStateVariable stress sstar;
 @AuxiliaryStateVariable real fstar;
 @AuxiliaryStateVariable real fn;
 @AuxiliaryStateVariable real fg;
+@AuxiliaryStateVariable real broken;
 
 @InitLocalVariables{
   const StressStensor sig_el = computeElasticPrediction();
   const StressStensor s_el   = deviator(sig_el);
   const double tr_el     = trace(sig_el);
-  const double   seq     = sqrt(3. * (s_el | s_el) / 2.);
+  const double seq       = sqrt(3. * (s_el | s_el) / 2.);
                delta     = ((1. / q1) - fc) / (fr - fc);
-        double fstar_el  = (f<fc) ? f : fc + (f-fc)*delta;
+               fstar_el  = (f<fc) ? f : fc + (f-fc)*delta;
   const double guess2_el = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr_el * tr_el)) / (2. * (1. + q1 * fstar));
   //solve for sig star
   sstar_el = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr_el, q1, q2, fstar_el}, {guess2_el});
@@ -81,9 +83,14 @@ s0.setGlossaryName("YieldStress");
   double R = sig0 + (sigs - sig0) * (1. - exp(-p / max(eps_phi, 1.e-10)));
   plast    = sstar_el - R > 0;
   bf       = false;
+  broken   = (sqrt((-2. * q1 * fstar_el) - (-1. - q1 * q1 * fstar_el * fstar_el)) < 1.e-2) ? 1 : 0;
 }
 
 @Integrator{
+  if (broken != 0){
+    return true;
+  } 
+  
   if (!plast) {
     // elastic case
     return true;
@@ -106,7 +113,8 @@ s0.setGlossaryName("YieldStress");
   //const Stensor dn_ddf    = theta * tr * iseq * (id - (iseq * tr / 2) * n);
                //fstar      = ft;
                fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
-        double dfstar     = (ft < fc) ? 1. : delta;
+               //broken     = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
+          double dfstar     = (ft < fc) ? 1. : delta;
   const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
                sstar      = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
   const double isstar     = 1. / max(sstar, 1.);
