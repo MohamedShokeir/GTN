@@ -83,7 +83,7 @@ s0.setGlossaryName("YieldStress");
   double R = sig0 + (sigs - sig0) * (1. - exp(-p / max(eps_phi, 1.e-10)));
   plast    = sstar_el - R > 0;
   bf       = false;
-  broken   = (sqrt((-2. * q1 * fstar_el) - (-1. - q1 * q1 * fstar_el * fstar_el)) < 1.e-2) ? 1 : 0;
+  //broken   = (sqrt((-2. * q1 * fstar_el) - (-1. - q1 * q1 * fstar_el * fstar_el)) < 1.e-2) ? 1 : 0;
 }
 
 @Integrator{
@@ -113,7 +113,7 @@ s0.setGlossaryName("YieldStress");
   //const Stensor dn_ddf    = theta * tr * iseq * (id - (iseq * tr / 2) * n);
                //fstar      = ft;
                fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
-               //broken     = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
+               //fstar      = (ft < fc) ? ft : ft * exp(0.1 * ft);
           double dfstar     = (ft < fc) ? 1. : delta;
   const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
                sstar      = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
@@ -132,7 +132,7 @@ s0.setGlossaryName("YieldStress");
   const Stensor dS_dsig        = (3. * s  * isstar2) + (q1q2_ * sinh_ * id);
   const Stensor4 d2S_dsig2     = (2. * Stensor4::M() * isstar2) + (q1q2_ * q2 * 0.5 * isstar * cosh_) * (id ^ id);
   const Stensor d2S_dsigdsstar = (-6. * s * isstar2 * isstar) - (q1q2_ * isstar * sinh_ * id) - (q1q2_ * q2 * 0.5 * isstar2 * tr * cosh_ * id);
-  const double dS_ddf          = ((2. * q1 * cosh_) - (2. * q1 * q1 * fstar)) * dfstar; 
+  const double dS_ddf          = ((2. * q1 * cosh_) - (2. * q1 * q1 * ft)) * dfstar; 
   const Stensor d2S_dsigddf    = (q1 * q2 * isstar * sinh_ * id) * dfstar;
   const double d2S_dsstarddf   = (-q1 * q2 * isstar2 * tr * sinh_) * dfstar;
   //cout << "dS_dsstar: " << dS_dsstar << endl;
@@ -208,7 +208,15 @@ s0.setGlossaryName("YieldStress");
     //dff_ddp   -= An * rvp_2;
   } // end of if (p > ps)
 // } // end of if(bf)
+  broken     = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
 } // end of @Integrator
+
+
+@UpdateAuxiliaryStateVariables {
+  if (broken == 1) {
+    sig *= 0;
+  }  
+}
 
 //@AdditionalConvergenceChecks {
 //  if (converged && (!bf)) {
