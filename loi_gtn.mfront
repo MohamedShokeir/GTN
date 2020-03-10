@@ -58,12 +58,16 @@ s0.setGlossaryName("YieldStress");
 @LocalVariable strain eps_phi;
 @LocalVariable double delta;
 
+eel.setMaximumIncrementValuePerIteration(1.e-4);
+p.setMaximumIncrementValuePerIteration(1.e-4);
+f.setMaximumIncrementValuePerIteration(1.e-4);
+
 @AuxiliaryStateVariable stress sstar_el;
 @AuxiliaryStateVariable stress fstar_el;
 @AuxiliaryStateVariable stress sstar;
 @AuxiliaryStateVariable real fstar;
-@AuxiliaryStateVariable real fn;
-@AuxiliaryStateVariable real fg;
+//@AuxiliaryStateVariable real fn;
+//@AuxiliaryStateVariable real fg;
 @AuxiliaryStateVariable real broken;
 
 @InitLocalVariables{
@@ -71,7 +75,8 @@ s0.setGlossaryName("YieldStress");
   const StressStensor s_el   = deviator(sig_el);
   const double tr_el     = trace(sig_el);
   const double seq       = sqrt(3. * (s_el | s_el) / 2.);
-               delta     = ((1. / q1) - fc) / (fr - fc);
+               //delta     = ((1. / q1) - fc) / (fr - fc);
+               delta     = 1.;
                fstar_el  = (f<fc) ? f : fc + (f-fc)*delta;
   const double guess2_el = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr_el * tr_el)) / (2. * (1. + q1 * fstar));
   //solve for sig star
@@ -83,7 +88,6 @@ s0.setGlossaryName("YieldStress");
   double R = sig0 + (sigs - sig0) * (1. - exp(-p / max(eps_phi, 1.e-10)));
   plast    = sstar_el - R > 0;
   bf       = false;
-  //broken   = (sqrt((-2. * q1 * fstar_el) - (-1. - q1 * q1 * fstar_el * fstar_el)) < 1.e-2) ? 1 : 0;
 }
 
 @Integrator{
@@ -107,20 +111,14 @@ s0.setGlossaryName("YieldStress");
   const double tr         = trace(sig);
   const double seq        = sqrt(3. * (s | s) / 2.);
   const double iseq       = 1 / (max(seq, real(1.e-10 * young)));
-  //const Stensor n         = eval(iseq * (3 * s / 2));
-  //const double tr_n       = trace(n);
-  //const Stensor4 dn_ddeel = iseq * theta * (Stensor4::M() + ft * (id ^ id) - (n ^ n)) * D;
-  //const Stensor dn_ddf    = theta * tr * iseq * (id - (iseq * tr / 2) * n);
-               //fstar      = ft;
-               fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
-               //fstar      = (ft < fc) ? ft : ft * exp(0.1 * ft);
-          double dfstar     = (ft < fc) ? 1. : delta;
+               //fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
+        //double dfstar     = (ft < fc) ? 1. : delta;
+                fstar     = ft * exp(0.1 * ft);
+        double dfstar     = exp(0.1 * ft) + 0.1 * ft * exp(0.1 * ft);
   const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
                sstar      = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
   const double isstar     = 1. / max(sstar, 1.);
   const double isstar2    = isstar * isstar;
-  //cout << "guess : " << guess2 << endl;
-  //cout << "sstar: " << sstar << endl;
   
   // GTN derivatives
   const double cosh_  = cosh(q2 * tr * 0.5 * isstar);
@@ -135,15 +133,6 @@ s0.setGlossaryName("YieldStress");
   const double dS_ddf          = ((2. * q1 * cosh_) - (2. * q1 * q1 * ft)) * dfstar; 
   const Stensor d2S_dsigddf    = (q1 * q2 * isstar * sinh_ * id) * dfstar;
   const double d2S_dsstarddf   = (-q1 * q2 * isstar2 * tr * sinh_) * dfstar;
-  //cout << "dS_dsstar: " << dS_dsstar << endl;
-  //cout << "idS_dsstar: " << idS_dsstar << endl;
-  //cout << "dS_dsig: " << dS_dsig << endl;
-  //cout << "d2S_dsig2: " << d2S_dsig2 << endl;
-  //cout << "d2S_dsigdsstar: " << d2S_dsigdsstar << endl;
-  //cout << "dS_ddf: " << dS_ddf << endl;
-  //cout << "d2S_dsigddf: " << d2S_dsigddf << endl;
-  //cout << "d2S_dsstarddf: " << d2S_dsstarddf << endl;
-
 
   // normal and derivatives
   const Stensor n         = eval(-idS_dsstar * dS_dsig);
@@ -152,12 +141,6 @@ s0.setGlossaryName("YieldStress");
   const double dsstar_ddf = -idS_dsstar * dS_ddf;
   const Stensor dn_ddf    = (-d2S_dsigddf * idS_dsstar) - (dS_dsig * d2S_dsstarddf * idS_dsstar * idS_dsstar);
   const Stensor4 dn_ddeel = theta * N * D;
-  //cout << "n: " << n << endl;
-  //cout << "tr_n: " << tr_n << endl;
-  //cout << "N: " << N << endl;
-  //cout << "dn_ddf: " << dn_ddf << endl;
-  //cout << "dn_ddeel: " << dn_ddeel << endl;
-  //cout << "---------------------------------" << endl;
  
   // split of the total strain
   feel        += rVt * dp * n;
@@ -182,7 +165,7 @@ s0.setGlossaryName("YieldStress");
   //dff_ddeel = -rVt * rVt * dp * (id | dn_ddeel);
   //dff_ddp   = -rVt * rVt * tr_n;
   //dff_ddf  += theta * dp * tr_n * 2 * rVt - rVt * rVt * dp * trace(dn_ddf);
-  //if (pt > ps && ft <= fN) {
+  //if (pt > ps && ft < fN) {
   if (pt > ps) {
   // maximal stress' eigen value and derivative
     tmatrix<3u, 3u, real> mp;

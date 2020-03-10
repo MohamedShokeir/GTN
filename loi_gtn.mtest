@@ -7,7 +7,7 @@
 
 // @MaterialProperty<constant> 'YoungModulus' 70e3; 
 // @MaterialProperty<constant> 'PoissonRatio' 0.3; 
-@MaterialProperty<constant> 'sigseuil' 200; 
+@MaterialProperty<constant> 'sigseuil' 500; 
 @MaterialProperty<constant> 'An0' 2.92; 
 @MaterialProperty<constant> 'fN' 0.0215; 
 @MaterialProperty<constant> 'fc' 0.04; 
@@ -22,7 +22,7 @@
 @NonLinearConstraint<Stress> 'SYY - 0.7*SXX';
 @NonLinearConstraint<Stress> 'SZZ - 0.7*SXX';
 
-@ImposedDeformationGradient 'FXX' {0:1,1:1.2};
+@ImposedDeformationGradient 'FXX' {0:1,1:1.5};
 @ImposedDeformationGradient 'FXY' 0;
 @ImposedDeformationGradient 'FYX' 0;
 @ImposedDeformationGradient 'FXZ' 0;
@@ -30,5 +30,5 @@
 @ImposedDeformationGradient 'FYZ' 0;
 @ImposedDeformationGradient 'FZY' 0;
 
-@Times{0,1 in 1000};
+@Times{0,1 in 100};
 
