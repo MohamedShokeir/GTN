@@ -43,7 +43,7 @@ sigseuil.setEntryName("sigseuil");
 @StateVariable real p;
 p.setGlossaryName("EquivalentPlasticStrain");
 
-@StateVariable real f;
+@AuxiliaryStateVariable real f;
 f.setGlossaryName("Porosity");
 @PhysicalBounds f in [0:1];
 
@@ -60,7 +60,7 @@ s0.setGlossaryName("YieldStress");
 
 eel.setMaximumIncrementValuePerIteration(1.e-4);
 p.setMaximumIncrementValuePerIteration(1.e-4);
-f.setMaximumIncrementValuePerIteration(1.e-4);
+//f.setMaximumIncrementValuePerIteration(1.e-4);
 
 @AuxiliaryStateVariable stress sstar_el;
 @AuxiliaryStateVariable stress fstar_el;
@@ -103,17 +103,18 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
 
   // quantities at t+theta*dt;
   const double pt  = max(p + theta * dp, strain(0));
-  const double ft  = max(min(f + theta * df, real(1)), real(0));
-  const double rVt = (1 - ft);
+//  const double ft  = max(min(f + theta * df, real(1)), real(0));
+//  const double rVt = (1 - ft);
+  const double rVt = (1 - f);
 
   // equivalent and effective stresses 
   const StressStensor s   = deviator(sig);
   const double tr         = trace(sig);
   const double seq        = sqrt(3. * (s | s) / 2.);
-               fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
+               fstar      = (f < fc) ? f : fc + (f - fc) * delta;
                //fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
         //double dfstar     = (ft < fc) ? 1. : delta;
-        double dfstar     = (ft < fc) ? 1. : delta;
+        double dfstar     = (f < fc) ? 1. : delta;
                 //fstar     = ft * exp(0.1 * ft);
         //double dfstar     = exp(0.1 * ft) + 0.1 * ft * exp(0.1 * ft);
   const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
@@ -162,12 +163,64 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
   //dfp_ddf   = theta * dsstar_ddf / young;
 //if (bf) {
   // porosity evolution
-  ff       -= rVt * rVt * dp * (n | id);  // sans germination
+//  ff       -= rVt * rVt * dp * (n | id);  // sans germination
   //dff_ddeel = -rVt * rVt * dp * (id | dn_ddeel);
   //dff_ddp   = -rVt * rVt * tr_n;
   //dff_ddf  += theta * dp * tr_n * 2 * rVt - rVt * rVt * dp * trace(dn_ddf);
   //if (pt > ps && ft < fN) {
-  if (pt > ps) {
+//  if (pt > ps) {
+  // maximal stress' eigen value and derivative
+//    tmatrix<3u, 3u, real> mp;
+//    tvector<3u, real> vp;
+//    std::tie(vp, mp) = sig.computeEigenVectors();
+ //   const int indmax = [&vp]() -> short {
+////      if ((vp(1) >= vp(0)) && (vp(1) >= vp(2))) {
+//        return 1;
+//      } if ((vp(2) >= vp(0)) && (vp(2) >= vp(1))) {
+  //      return 2;
+//      }
+//      return 0;
+ //   }();
+////    Stensor ds[3];
+//    std::tie(ds[0], ds[1], ds[2]) = sig.computeEigenTensors(mp);
+//    const Stensor dsI_ddeel = eval(ds[indmax] * theta * D);
+//    const double vpseuil    = (vp(indmax) > sigseuil) ? 1 : 0;
+//    const double rvp        = vp(indmax) / sigseuil - 1;
+//    const double rvp_2      = power<2>(rvp);
+//    const double An         = An0 * vpseuil;
+//    ff        -= An * rvp_2 * dp;  // loi Tom;
+    //dff_ddeel -= 2 * An * dp * rvp * dsI_ddeel / sigseuil;
+    //dff_ddp   -= An * rvp_2;
+//  } // end of if (p > ps)
+// } // end of if(bf)
+  //broken     = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
+} // end of @Integrator
+
+
+@UpdateAuxiliaryStateVariables {
+  const Stensor id        = Stensor::Id();
+  const StressStensor s   = deviator(sig);
+  const double tr         = trace(sig);
+  const double seq        = sqrt(3. * (s | s) / 2.);
+               fstar      = (f < fc) ? f : fc + (f - fc) * delta;
+        double dfstar     = (f < fc) ? 1. : delta;
+  const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
+               sstar      = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
+  const double isstar     = 1. / max(sstar, 1.);
+  const double isstar2    = isstar * isstar;
+  
+  // GTN derivatives
+  const double sinh_  = sinh(q2 * tr * 0.5 * isstar);
+  const double q1q2_  = q1 * q2 * fstar * isstar;
+  const double dS_dsstar       = (-2. * seq * seq * isstar2 * isstar) - (q1q2_ *isstar * tr * sinh_);
+  const double idS_dsstar      = 1. / dS_dsstar;
+  const Stensor dS_dsig        = (3. * s  * isstar2) + (q1q2_ * sinh_ * id);
+
+  // normal and derivatives
+  const Stensor n         = eval(-idS_dsstar * dS_dsig);
+  
+  f     += (1 -f) * (1 - f) * dp * (n | id); 
+  if (p > ps) {
   // maximal stress' eigen value and derivative
     tmatrix<3u, 3u, real> mp;
     tvector<3u, real> vp;
@@ -176,7 +229,7 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
       if ((vp(1) >= vp(0)) && (vp(1) >= vp(2))) {
         return 1;
       } if ((vp(2) >= vp(0)) && (vp(2) >= vp(1))) {
-        return 2;
+      return 2;
       }
       return 0;
     }();
@@ -187,21 +240,17 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
     const double rvp        = vp(indmax) / sigseuil - 1;
     const double rvp_2      = power<2>(rvp);
     const double An         = An0 * vpseuil;
-    ff        -= An * rvp_2 * dp;  // loi Tom;
-    //dff_ddeel -= 2 * An * dp * rvp * dsI_ddeel / sigseuil;
-    //dff_ddp   -= An * rvp_2;
-  } // end of if (p > ps)
-// } // end of if(bf)
-  //broken     = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
-} // end of @Integrator
+    
+    f     +=  An * rvp_2 * dp;  
+  } //end of (p > ps)
 
-
-@UpdateAuxiliaryStateVariables {
+ fstar  = (f < fc) ? f : fc + (f - fc) * delta;
+ 
   broken = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
-  
   if (broken == 1) {
     sig *= 0;
   }  
+  
 }
 
 //@AdditionalConvergenceChecks {
