@@ -12,7 +12,7 @@
 @Theta 1;
 
 @Includes{
-#include "../newton.hpp"
+#include "../newton_niter.hpp"
 }
 
 @ComputeStiffnessTensor<UnAltered> {70e3,0.3};
@@ -66,22 +66,25 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
 @AuxiliaryStateVariable stress fstar_el;
 @AuxiliaryStateVariable stress sstar;
 @AuxiliaryStateVariable real fstar;
-//@AuxiliaryStateVariable real fn;
-//@AuxiliaryStateVariable real fg;
+@AuxiliaryStateVariable real fn;
+@AuxiliaryStateVariable real fg;
 @AuxiliaryStateVariable real broken;
+@AuxiliaryStateVariable real niter_el;
+@AuxiliaryStateVariable real niter;
 
 @InitLocalVariables{
   const StressStensor sig_el = computeElasticPrediction();
-  const StressStensor s_el   = deviator(sig_el);
   const double tr_el     = trace(sig_el);
-  const double seq       = sqrt(3. * (s_el | s_el) / 2.);
+  const double seq       = sigmaeq(sig_el);
                delta     = ((1. / q1) - fc) / (fr - fc);
                //delta     = 1.;
                fstar_el  = (f<fc) ? f : fc + (f-fc)*delta;
   const double guess2_el = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr_el * tr_el)) / (2. * (1. + q1 * fstar));
   //solve for sig star
-  sstar_el = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr_el, q1, q2, fstar_el}, {guess2_el});
- 
+  //sstar_el = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr_el, q1, q2, fstar_el}, {guess2_el});
+  std::vector<double> sstar_el_res = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr_el, q1, q2, fstar_el}, {guess2_el});
+  sstar_el = sstar_el_res[0];
+  //cout << "sstar_el" << sstar_el << endl;
   sig0     = (274. + 26.175823633727898   * pow(phi, 0.42106414268927667));
   sigs     = (310. + 25.81119886007225    * pow(phi, 0.3978634475501675));
   eps_phi  = (0.0635340625  - 0.013950378309324024 * pow(phi, 0.22164422977868983));
@@ -109,7 +112,7 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
   // equivalent and effective stresses 
   const StressStensor s   = deviator(sig);
   const double tr         = trace(sig);
-  const double seq        = sqrt(3. * (s | s) / 2.);
+  const double seq        = sigmaeq(sig);
                fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
                //fstar      = (ft < fc) ? ft : fc + (ft - fc) * delta;
         //double dfstar     = (ft < fc) ? 1. : delta;
@@ -117,7 +120,10 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
                 //fstar     = ft * exp(0.1 * ft);
         //double dfstar     = exp(0.1 * ft) + 0.1 * ft * exp(0.1 * ft);
   const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
-               sstar      = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
+              // sstar      = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
+  std::vector<double> sstar_res = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
+  sstar = sstar_res[0];
+  niter = sstar_res[1];
   const double isstar     = 1. / max(sstar, 1.);
   const double isstar2    = isstar * isstar;
   
@@ -166,8 +172,8 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
   //dff_ddeel = -rVt * rVt * dp * (id | dn_ddeel);
   //dff_ddp   = -rVt * rVt * tr_n;
   //dff_ddf  += theta * dp * tr_n * 2 * rVt - rVt * rVt * dp * trace(dn_ddf);
-  //if (pt > ps && ft < fN) {
-  if (pt > ps) {
+  if (pt > ps && ft < fN) {
+  //if (pt > ps) {
   // maximal stress' eigen value and derivative
     tmatrix<3u, 3u, real> mp;
     tvector<3u, real> vp;
@@ -197,6 +203,33 @@ f.setMaximumIncrementValuePerIteration(1.e-4);
 
 
 @UpdateAuxiliaryStateVariables {
+
+  tmatrix<3u, 3u, real> mp;
+  tvector<3u, real> vp;
+  std::tie(vp, mp) = sig.computeEigenVectors();
+  const int indmax = [&vp]() -> short {
+  if ((vp(1) >= vp(0)) && (vp(1) >= vp(2))) {
+    return 1;
+  } if ((vp(2) >= vp(0)) && (vp(2) >= vp(1))) {
+    return 2;
+  }
+    return 0;
+  }();
+  Stensor ds[3];
+  std::tie(ds[0], ds[1], ds[2]) = sig.computeEigenTensors(mp);
+  const Stensor dsI_ddeel = eval(ds[indmax] * theta * D);
+  const double vpseuil    = (vp(indmax) > sigseuil) ? 1 : 0;
+  const double rvp        = vp(indmax) / sigseuil - 1;
+  const double rvp_2      = power<2>(rvp);
+  const double An         = (p>ps) ? An0 * vpseuil : 0;
+  
+  //cout << "rvp: " << rvp_2 << endl;
+  //cout << "An: " << An << endl;
+  //cout << "dp: " << dp << endl;
+ 
+  fn       += An * rvp_2 * dp;  // loi Tom;
+  fg        = f - fn;
+ 
   broken = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
   
   if (broken == 1) {
