@@ -19,7 +19,7 @@ inline double myfunction(double& variable, const std::vector<double> parameters)
 
 inline double derivMyFunction(double& variable, const std::vector<double> parameters){
 
-  double seq   = parameters[0];
+//  double seq   = parameters[0];
   double tr    = parameters[1];
   double q1    = parameters[2];
   double q2    = parameters[3];

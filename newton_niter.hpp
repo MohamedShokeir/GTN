@@ -12,7 +12,7 @@ inline std::vector<double> scalarNewtonSolver(std::function<double (double&, con
 
   double epsilon = 1.e-6;
   int niter_max  = 100;
-  int niter      = 0;
+  double niter      = 0;
   double x       = x1;
   double resinit = f(x, param);
   double res     = resinit;
@@ -25,7 +25,7 @@ inline std::vector<double> scalarNewtonSolver(std::function<double (double&, con
     //cout << "niter= " << niter << endl;
     //cout << "---------------------------" << endl;
   }while((fabs(res/resinit) > epsilon) && (niter < niter_max));
-  std::vector<double> ret = {x,niter};
+  //std::vector<double> ret = {x,niter};
   //return ret;
   //return x;
   return {x,niter};
