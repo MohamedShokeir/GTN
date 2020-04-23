@@ -1,0 +1,271 @@
+@DSL Implicit;
+@Behaviour GTN;
+@Author Mohamed Shokeir;
+@Date 24/02/2020;
+
+@Brick StandardElasticity;
+@ModellingHypotheses {".+"};
+@StrainMeasure Hencky;
+
+//@CompareToNumericalJacobian true;
+//@JacobianComparisonCriterion 1.e-1;
+//@UMATGenerateMTestFileOnFailure true ;
+//@UMATUseTimeSubStepping true;
+//@UMATMaximumSubStepping 20;
+
+@Algorithm NewtonRaphson_NumericalJacobian;
+//@PerturbationValueForNumericalJacobianComputation 1.e-9;
+@Epsilon 1e-10;
+@Theta 1;
+
+@Includes{
+#include "../newton_niter.hpp"
+}
+
+@ComputeStiffnessTensor<UnAltered> {70e3,0.3};
+
+//Definir les variables
+@ExternalStateVariable real phi;
+phi.setEntryName("ThermalNeutronFluence");
+@PhysicalBounds phi in [0:*[;
+@Bounds phi in [0:1000];
+
+@MaterialProperty real fN;
+fN.setEntryName("ffN");
+@MaterialProperty real fc;
+fc.setEntryName("ffc");
+@MaterialProperty real fr;
+fr.setEntryName("ffr");
+@MaterialProperty real q1;
+q1.setEntryName("q1");
+@MaterialProperty real q2;
+q2.setEntryName("q2");
+@MaterialProperty real An0;
+An0.setEntryName("An0");
+@MaterialProperty real ps;
+ps.setEntryName("pps");
+@MaterialProperty real sigseuil;
+sigseuil.setEntryName("ssig");
+
+@StateVariable real p;
+p.setGlossaryName("EquivalentPlasticStrain");
+
+@AuxiliaryStateVariable real f;
+f.setGlossaryName("Porosity");
+@PhysicalBounds f in [0:1];
+
+@Parameter s0 = 274.;
+s0.setGlossaryName("YieldStress");
+
+@LocalVariable bool plast;
+
+@LocalVariable stress sig0;
+@LocalVariable stress sigs;
+@LocalVariable strain eps_phi;
+@LocalVariable double delta;
+@LocalVariable double nn;
+
+eel.setMaximumIncrementValuePerIteration(1.e-4);
+p.setMaximumIncrementValuePerIteration(1.e-4);
+
+//@AuxiliaryStateVariable stress sstar_el;
+//@AuxiliaryStateVariable stress fstar_el;
+@AuxiliaryStateVariable stress sstar;
+@AuxiliaryStateVariable real fstar;
+@AuxiliaryStateVariable real fn;
+@AuxiliaryStateVariable real fg;
+@AuxiliaryStateVariable real broken;
+//@AuxiliaryStateVariable real niter_el;
+@AuxiliaryStateVariable real niter;
+@AuxiliaryStateVariable stress sigI;
+@AuxiliaryStateVariable stress vfra;
+
+@InitLocalVariables{
+  const StressStensor sig_el = computeElasticPrediction();
+  const double tr_el         = trace(sig_el);
+  const double seq           = sigmaeq(sig_el);
+
+  //fstar bilinear :             
+        //double fstar_el    = (f<fc) ? f : fc + (f-fc) * delta;
+             //delta         = ((1. / q1) - fc) / (fr - fc);
+  
+  //fstar parabolic :
+  const auto aa              = ((1./q1) - fc) / power<2>(fr - fc)   ;
+  const auto bb              =  1. - 2. * fc * aa; 
+  const auto cc              =  aa * fc * fc;
+        double fstar_el      = (f < fc) ? f : aa * (f * f) + bb * f + cc;
+               delta         = 1. ;
+  
+  //fstar exponential :
+        //double fstar_el      = 0.18 * exp(86.4 * f - 3.86) - 0.0011;
+               //delta         = 1. ;
+  
+  //fstar regularised : 
+               //nn            = 2.;
+        //double f1            = pow(f, nn);
+        //double f2            = pow((max((fc + delta * (f - fc)), 0.)), nn);
+        //double fstar_el      = pow((f1 + f2), (1./nn));
+               //delta         = 1. ;
+  
+  const double guess2_el     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr_el * tr_el)) / (2. * (1. + q1 * fstar));
+  
+  //solve for sig star
+  //sstar_el = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr_el, q1, q2, fstar_el}, {guess2_el});
+  std::vector<double> sstar_el_res = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr_el, q1, q2, fstar_el}, {guess2_el});
+  double sstar_el = sstar_el_res[0];
+  
+  sig0     = (274. + 26.175823633727898   * pow(phi, 0.42106414268927667));
+  sigs     = (310. + 25.81119886007225    * pow(phi, 0.3978634475501675));
+  eps_phi  = (0.0635340625  - 0.013950378309324024 * pow(phi, 0.22164422977868983));
+  double R = sig0 + (sigs - sig0) * (1. - exp(-p / max(eps_phi, 1.e-10)));
+  
+  plast    = sstar_el - R > 0;
+}
+
+@Integrator{
+  if (broken != 0){
+    return true;
+  } 
+  
+  if (!plast) {
+    // elastic case
+    return true;
+  }
+  const Stensor id = Stensor::Id();
+
+  // quantities at t+theta*dt;
+  const double pt  = max(p + theta * dp, strain(0));
+  const double rVt = (1 - f);
+  
+  // equivalent and effective stresses 
+  const StressStensor s   = deviator(sig);
+  const double tr         = trace(sig);
+  const double seq        = sigmaeq(sig); 
+  
+  //fstar bilinear 
+               //fstar      = (f < fc) ? f : fc + (f - fc) * delta;
+
+  //fstar parabolic
+  const auto aa              = ((1./q1) - fc) / power<2>(fr - fc)   ;
+  const auto bb              =  1. - 2. * fc * aa; 
+  const auto cc              =  aa * fc * fc;
+             fstar           = (f < fc) ? f : aa * (f * f) + bb * f + cc;
+ 
+  //fstar regularised
+        //double f1            = pow(f, nn);
+        //double mf2           = max((fc + delta * (f - fc)), 0.);
+        //double f2            = pow(mf2, nn);
+        //double inn           = 1./nn;
+        //double nn1           = nn - 1.;
+        //double df1           = pow((f1 + f2), (inn - 1.));
+        //double df2           = pow(f1, nn1) + delta * pow(f2, nn1);
+  
+  //fstar exponential  
+               //fstar      = 0.18 * exp(86.4 * f - 3.86) - 0.0011; 
+       
+  const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
+              // sstar      = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
+  std::vector<double> sstar_res = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
+  sstar = sstar_res[0];
+  niter = sstar_res[1];
+  const double isstar     = 1. / max(sstar, 1.);
+  const double isstar2    = isstar * isstar;
+  
+  // GTN derivatives
+  const double sinh_  = sinh(q2 * tr * 0.5 * isstar);
+  const double q1q2_  = q1 * q2 * fstar * isstar;
+  const double dS_dsstar       = (-2. * seq * seq * isstar2 * isstar) - (q1q2_ * isstar * tr * sinh_);
+  const double idS_dsstar      = (dS_dsstar != 0) ? (1. / dS_dsstar) : 1;
+  const Stensor dS_dsig        = (3. * s  * isstar2) + (q1q2_ * sinh_ * id);
+
+  // normal and derivatives
+  const Stensor n         = eval(-idS_dsstar * dS_dsig);
+ 
+  // split of the total strain
+  feel        += rVt * dp * n;
+  
+  // plastic evolution
+  const double exp_pt = exp(-pt / max(eps_phi, 1.e-10));
+  const double R      = sig0 + (sigs - sig0) * (1. - exp_pt);
+  fp = (sstar - R) / young;
+  if (sstar > 10 * R) {
+    return false;
+  }
+ 
+  } // end of @Integrator
+
+@UpdateAuxiliaryStateVariables {
+    
+  const Stensor id = Stensor::Id();
+  const StressStensor s   = deviator(sig);
+  const double tr         = trace(sig);
+  const double seq        = sigmaeq(sig);
+  const auto rVt          = (1. - f);
+  
+  //fstar bilinear               
+               //fstar      = (f < fc) ? f : fc + (f - fc) * delta;
+ 
+  //fstar parabolic
+  const auto aa           = ((1./q1) - fc) / power<2>(fr - fc);
+  const auto bb           =  1. - 2. * fc * aa; 
+  const auto cc           =  aa * fc * fc;            
+               fstar      = (f < fc) ? f : aa * (f * f) + bb * f + cc;
+
+  //fstar regularised
+        //double f1         = pow(f, nn);
+        //double f2         = pow((max((fc + delta * (f - fc)), 0.)), nn);
+        //double inn        = 1./nn;
+               //fstar      = pow((f1 + f2), inn);
+   
+  //fstar exponential                 
+               //fstar      = 0.18 * exp(86.4 * f - 3.86) - 0.0011; 
+          
+  const double guess2     = sqrt((4 * seq * seq) + (q1 * q2 * q2 * fstar * tr * tr)) / (2. * (1. + q1 * fstar));
+  std::vector<double> sstar_res = scalarNewtonSolver(myfunction, derivMyFunction, {seq, tr, q1, q2, fstar}, {guess2});
+  const double sstar1     = sstar_res[0];
+  const double isstar     = 1. / max(sstar1, 1.);
+  const double isstar2    = isstar * isstar;
+  const double sinh_      = sinh(q2 * tr * 0.5 * isstar);
+  const double q1q2_      = q1 * q2 * fstar * isstar;
+  const double dS_dsstar  = (-2. * seq * seq * isstar2 * isstar) - (q1q2_ *isstar * tr * sinh_);
+  const double idS_dsstar = 1. / dS_dsstar;
+  const Stensor dS_dsig   = (3. * s  * isstar2) + (q1q2_ * sinh_ * id);
+  const Stensor n         = eval(-idS_dsstar * dS_dsig);
+  
+  // porosity evolution
+  f   += rVt * rVt * dp * (n | id);  // sans germination
+    
+  // maximal stress' eigen value and derivative
+  tmatrix<3u, 3u, real> mp;
+  tvector<3u, real> vp;
+  std::tie(vp, mp) = sig.computeEigenVectors();
+  const int indmax = [&vp]() -> short {
+    if ((vp(1) >= vp(0)) && (vp(1) >= vp(2))) {
+      return 1;
+    } if ((vp(2) >= vp(0)) && (vp(2) >= vp(1))) {
+      return 2;
+    }
+      return 0;
+  }();
+  sigI = (broken == 0) ? (vp(indmax)) : 0.;
+  Stensor ds[3];
+  std::tie(ds[0], ds[1], ds[2]) = sig.computeEigenTensors(mp);
+  const double vpseuil    = (vp(indmax) > sigseuil) ? 1 : 0;
+  const double rvp        = vp(indmax) / sigseuil - 1;
+  const double rvp_2      = power<2>(rvp);
+  const double An         = (p>ps && fn<fN) ? An0 * vpseuil : 0;
+  f  += An * rvp_2 * dp;  // loi Tom;
+
+  fn += An * rvp_2 * dp; 
+  fg  = f - fn;
+  
+  vfra   = (rVt * rVt * dp * (n | id) + An * rvp_2 * dp)/dt;
+ 
+  broken = (fstar > (1./q1) - 1.e-2) ? 1 : 0;
+  //broken = (sqrt((-2. * q1 * fstar) - (-1. - q1 * q1 * fstar * fstar)) < 1.e-2) ? 1 : 0;
+  
+  if (broken == 1) {
+    sig *= 0;
+  }  
+} // end of UpdateAuxiliaryStateVariables
+
